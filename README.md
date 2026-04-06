@@ -24,7 +24,7 @@ FraudGraph maps financial transactions as a graph and finds hidden rings of frau
 | Graph DB | TigerGraph Savanna (free tier) |
 | Backend | Python FastAPI |
 | Frontend | React + Cytoscape.js (graph viz) |
-| Data | Synthetic IEEE-CIS-style transaction data |
+| Data | Random data generated using faker.js |
 | Integration | pyTigerGraph + TigerGraph MCP |
 
 ---
