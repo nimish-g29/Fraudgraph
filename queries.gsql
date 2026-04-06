@@ -1,0 +1,222 @@
+// ============================================================
+// Fraud Scoring — propagates fraud signals across the graph
+// Inspired by PageRank: flagged neighbors increase your score
+// ============================================================
+
+CREATE OR REPLACE QUERY fraud_score_propagation(INT max_hops = 3, FLOAT decay = 0.6) FOR GRAPH FraudGraph {
+  /*
+    Propagates fraud scores outward from known-bad accounts.
+    Each hop decays the score by `decay` factor.
+    Run this periodically to keep scores fresh.
+  */
+
+  SumAccum<FLOAT> @score;
+  SumAccum<FLOAT> @new_score;
+  OrAccum         @visited;
+
+  // Seed: start from all flagged accounts
+  seed = {Account.*};
+
+  // Initialize scores from flagged accounts
+  start = SELECT a FROM seed:a
+          WHERE a.is_flagged == TRUE
+          ACCUM a.@score += 1.0, a.@visited = TRUE;
+
+  // Propagate outward hop by hop
+  FOREACH i IN RANGE[1, max_hops] DO
+    frontier = SELECT tgt
+               FROM start:src -(SHARES_DEVICE | SHARES_IP)- Account:tgt
+               WHERE tgt.@visited == FALSE
+               ACCUM tgt.@new_score += src.@score * decay
+               POST-ACCUM tgt.@score += tgt.@new_score,
+                          tgt.@visited = TRUE,
+                          tgt.@new_score = 0;
+    start = frontier;
+  END;
+
+  // Write scores back to vertex attributes using POST-ACCUM
+  result = SELECT a FROM {Account.*}
+           POST-ACCUM a.fraud_score = a.@score
+           ORDER BY a.@score DESC
+           LIMIT 50;
+
+  PRINT result [a.account_id, a.name, a.@score, a.is_flagged, a.country];
+}
+
+
+// ============================================================
+// Ring Detection — finds clusters of mutually connected accounts
+// ============================================================
+
+CREATE OR REPLACE QUERY detect_fraud_rings(STRING start_account, INT max_hops = 4) FOR GRAPH FraudGraph {
+  /*
+    From a given account, traverse up to max_hops via shared
+    devices/IPs to find the full fraud ring.
+    Returns all nodes + edges for visualization.
+  */
+
+  OrAccum  @visited;
+  ListAccum<VERTEX<Account>> @@ring_members;
+  ListAccum<EDGE>            @@ring_edges;
+
+  seed = {Account.*};
+  start = SELECT a FROM seed:a WHERE a.account_id == start_account;
+
+  // BFS traversal
+  frontier = start;
+  frontier.@visited = TRUE;
+
+  FOREACH i IN RANGE[1, max_hops] DO
+    next_frontier = SELECT tgt
+                    FROM frontier:src -(SHARES_DEVICE | SHARES_IP):e- Account:tgt
+                    WHERE tgt.@visited == FALSE
+                    ACCUM @@ring_edges += e,
+                          tgt.@visited = TRUE
+                    POST-ACCUM @@ring_members += tgt
+                    LIMIT 200;
+    frontier = next_frontier;
+    IF frontier.size() == 0 THEN BREAK; END;
+  END;
+
+  // Also get transactions from ring members
+  ring_set = SELECT a FROM {Account.*} WHERE a.@visited == TRUE;
+  transactions = SELECT t FROM ring_set:a -(SENT)-> Transaction:t;
+
+  PRINT ring_set [a.account_id, a.name, a.fraud_score, a.is_flagged, a.country];
+  PRINT transactions [t.tx_id, t.amount, t.is_fraud, t.timestamp, t.tx_type];
+  PRINT @@ring_edges;
+}
+
+
+// ============================================================
+// Shortest Suspicious Path — find how two accounts are linked
+// ============================================================
+
+CREATE OR REPLACE QUERY suspicious_path(STRING account_a, STRING account_b) FOR GRAPH FraudGraph {
+  /*
+    Finds the shortest path between two accounts through
+    shared devices or IPs (Account-to-Account edges only).
+    Great for explaining connections to non-technical users.
+  */
+
+  MinAccum<INT>     @hop_count;
+  ListAccum<STRING> @path;
+  OrAccum           @visited;
+
+  seed = {Account.*};
+  src  = SELECT a FROM seed:a WHERE a.account_id == account_a
+         ACCUM a.@hop_count = 0, a.@visited = TRUE;
+  tgt  = SELECT a FROM seed:a WHERE a.account_id == account_b;
+
+  frontier = src;
+
+  WHILE frontier.size() > 0 LIMIT 10 DO
+    frontier = SELECT next
+               FROM frontier:curr -(SHARES_DEVICE | SHARES_IP)- Account:next
+               WHERE next.@visited == FALSE
+               ACCUM next.@hop_count = curr.@hop_count + 1,
+                     next.@path = curr.@path + [curr.account_id],
+                     next.@visited = TRUE;
+  END;
+
+  result = SELECT a FROM tgt:a;
+  PRINT result [a.account_id, a.@hop_count, a.@path];
+}
+
+
+// ============================================================
+// High Risk Neighborhood — instant red flags for any account
+// ============================================================
+
+CREATE OR REPLACE QUERY account_risk_snapshot(STRING account_id) FOR GRAPH FraudGraph {
+  /*
+    Returns a full risk picture for one account:
+    - Its own fraud score
+    - 1-hop neighbors and their scores
+    - Recent transactions
+    - Shared devices and IPs
+  */
+
+  seed = {Account.*};
+  target = SELECT a FROM seed:a WHERE a.account_id == account_id;
+
+  // Direct neighbors via shared infra
+  neighbors = SELECT n FROM target:a -(SHARES_DEVICE | SHARES_IP)- Account:n;
+
+  // Devices used
+  devices = SELECT d FROM target:a -(USED_DEVICE)-> Device:d;
+
+  // IPs used
+  ips = SELECT ip FROM target:a -(CONNECTED_FROM)-> IPAddress:ip;
+
+  // Transactions
+  sent_txs = SELECT t FROM target:a -(SENT)-> Transaction:t ORDER BY t.timestamp DESC LIMIT 20;
+  recv_txs = SELECT t FROM target:a -(RECEIVED)-> Transaction:t ORDER BY t.timestamp DESC LIMIT 20;
+
+  PRINT target [a.account_id, a.name, a.fraud_score, a.is_flagged, a.country, a.email];
+  PRINT neighbors [n.account_id, n.name, n.fraud_score, n.is_flagged];
+  PRINT devices;
+  PRINT ips;
+  PRINT sent_txs [t.tx_id, t.amount, t.is_fraud, t.timestamp];
+  PRINT recv_txs [t.tx_id, t.amount, t.is_fraud, t.timestamp];
+}
+
+
+// ============================================================
+// Anomaly Detection — flag unusual transactions
+// ============================================================
+
+CREATE OR REPLACE QUERY detect_anomalies(FLOAT threshold = 1000.0, INT limit_results = 50) FOR GRAPH FraudGraph {
+  /*
+    Detects transactions with amounts above threshold that are not flagged as fraud.
+    Useful for identifying potential new fraud cases.
+  */
+
+  result = SELECT t FROM Transaction:t
+           WHERE t.amount > threshold AND t.is_fraud == FALSE
+           ORDER BY t.amount DESC
+           LIMIT limit_results;
+
+  PRINT result [t.tx_id, t.amount, t.currency, t.timestamp, t.tx_type, t.status];
+}
+
+
+// ============================================================
+// Simple Community Detection — find clusters via shared connections
+// ============================================================
+
+CREATE OR REPLACE QUERY detect_communities(INT min_cluster_size = 3) FOR GRAPH FraudGraph {
+  /*
+    Simple clustering: groups accounts connected via shared devices/IPs.
+    Uses a basic connected components approach.
+  */
+
+  OrAccum @visited;
+  ListAccum<VERTEX<Account>> @@clusters;
+
+  seed = {Account.*};
+
+  FOREACH cluster_id IN RANGE[0, 100] DO  // Limit to 100 clusters
+    unvisited = SELECT a FROM seed:a WHERE a.@visited == FALSE LIMIT 1;
+    IF unvisited.size() == 0 THEN BREAK; END;
+
+    cluster = SELECT a FROM unvisited:a
+              ACCUM a.@visited = TRUE;
+
+    // Expand cluster via shared connections
+    frontier = cluster;
+    WHILE frontier.size() > 0 DO
+      next = SELECT n FROM frontier:f -(SHARES_DEVICE | SHARES_IP)- Account:n
+             WHERE n.@visited == FALSE
+             ACCUM n.@visited = TRUE;
+      frontier = next;
+      cluster = cluster UNION frontier;
+    END;
+
+    IF cluster.size() >= min_cluster_size THEN
+      @@clusters += cluster;
+    END;
+  END;
+
+  PRINT @@clusters;
+}

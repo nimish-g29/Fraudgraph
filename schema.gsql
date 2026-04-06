@@ -1,0 +1,134 @@
+// ============================================================
+// FraudGraph Schema
+// TigerGraph Savanna — paste this in GraphStudio or run via MCP
+// ============================================================
+
+// ---------- VERTEX TYPES ----------
+
+CREATE VERTEX Account (
+  PRIMARY_ID account_id STRING,
+  name       STRING,
+  email      STRING,
+  phone      STRING,
+  created_at STRING,
+  country    STRING,
+  is_flagged BOOL DEFAULT FALSE,
+  fraud_score FLOAT DEFAULT 0.0
+) WITH STATS="OUTDEGREE_BY_EDGETYPE"
+
+CREATE VERTEX Device (
+  PRIMARY_ID device_id STRING,
+  device_type STRING,
+  os          STRING,
+  browser     STRING
+) WITH STATS="OUTDEGREE_BY_EDGETYPE"
+
+CREATE VERTEX IPAddress (
+  PRIMARY_ID ip STRING,
+  country    STRING,
+  is_vpn     BOOL DEFAULT FALSE,
+  is_tor     BOOL DEFAULT FALSE
+) WITH STATS="OUTDEGREE_BY_EDGETYPE"
+
+CREATE VERTEX Transaction (
+  PRIMARY_ID tx_id     STRING,
+  amount     FLOAT,
+  currency   STRING,
+  timestamp  STRING,
+  tx_type    STRING,
+  status     STRING,
+  is_fraud   BOOL DEFAULT FALSE
+) WITH STATS="OUTDEGREE_BY_EDGETYPE"
+
+CREATE VERTEX MerchantCategory (
+  PRIMARY_ID category STRING,
+  risk_level STRING
+)
+
+// ---------- NEW VERTEX TYPES ----------
+
+CREATE VERTEX Location (
+  PRIMARY_ID location_id STRING,
+  city STRING,
+  country STRING,
+  risk_score FLOAT DEFAULT 0.0
+) WITH STATS="OUTDEGREE_BY_EDGETYPE"
+
+CREATE VERTEX UserProfile (
+  PRIMARY_ID profile_id STRING,
+  login_pattern STRING,  // e.g., "morning", "evening"
+  avg_transaction_amount FLOAT DEFAULT 0.0,
+  transaction_frequency INT DEFAULT 0,
+  risk_profile STRING DEFAULT "low"
+) WITH STATS="OUTDEGREE_BY_EDGETYPE"
+
+// ---------- EDGE TYPES ----------
+
+// Account used a device
+CREATE DIRECTED EDGE USED_DEVICE (
+  FROM Account, TO Device,
+  last_seen STRING
+)
+
+// Account connected from IP
+CREATE DIRECTED EDGE CONNECTED_FROM (
+  FROM Account, TO IPAddress,
+  times INT DEFAULT 1
+)
+
+// Account sent a transaction
+CREATE DIRECTED EDGE SENT (
+  FROM Account, TO Transaction,
+  timestamp STRING
+)
+
+// Account received a transaction
+CREATE DIRECTED EDGE RECEIVED (
+  FROM Account, TO Transaction,
+  timestamp STRING
+)
+
+// Transaction belongs to merchant category
+CREATE DIRECTED EDGE IN_CATEGORY (
+  FROM Transaction, TO MerchantCategory
+)
+
+// Accounts share device (derived, populated by query)
+CREATE UNDIRECTED EDGE SHARES_DEVICE (
+  FROM Account, TO Account,
+  device_id STRING,
+  count INT DEFAULT 1
+)
+
+// Accounts share IP (derived)
+CREATE UNDIRECTED EDGE SHARES_IP (
+  FROM Account, TO Account,
+  ip STRING,
+  count INT DEFAULT 1
+)
+
+// ---------- NEW EDGE TYPES ----------
+
+// Account located at a location
+CREATE DIRECTED EDGE LOCATED_AT (
+  FROM Account, TO Location,
+  last_seen STRING
+)
+
+// Account has a user profile
+CREATE DIRECTED EDGE HAS_PROFILE (
+  FROM Account, TO UserProfile
+)
+
+// IP address located at a location
+CREATE DIRECTED EDGE IP_LOCATED_AT (
+  FROM IPAddress, TO Location
+)
+
+// ---------- GRAPH ----------
+
+CREATE GRAPH FraudGraph (
+  Account, Device, IPAddress, Transaction, MerchantCategory, Location, UserProfile,
+  USED_DEVICE, CONNECTED_FROM, SENT, RECEIVED, IN_CATEGORY,
+  SHARES_DEVICE, SHARES_IP, LOCATED_AT, HAS_PROFILE, IP_LOCATED_AT
+)
