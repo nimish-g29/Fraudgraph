@@ -23,10 +23,11 @@ function avatarColor(id) {
   return AVATAR_COLORS[h]
 }
 
-export default function Dashboard({ onInvestigate, onVisualize }) {
+export default function Dashboard({ onInvestigate, onVisualize, onRunDemo, demoRunning }) {
   const [stats, setStats] = useState(null)
   const [flagged, setFlagged] = useState([])
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
 
   useEffect(() => {
     let mounted = true
@@ -44,17 +45,16 @@ export default function Dashboard({ onInvestigate, onVisualize }) {
         setFlagged(f.data)
       } catch {
         if (!mounted) return
-
         setStats({
-          total_accounts: 500,
-          total_transactions: 2347,
+          total_accounts: 120,
+          total_transactions: 2374,
           total_devices: 180,
           total_ips: 120,
-          flagged_accounts: 43,
-          total_edges: 8920
+          flagged_accounts: 12,
+          total_edges: 241
         })
-
         setFlagged(DEMO_FLAGGED)
+        setError('')
       } finally {
         if (mounted) setLoading(false)
       }
@@ -75,9 +75,14 @@ export default function Dashboard({ onInvestigate, onVisualize }) {
 
   return (
     <div className="fade-up">
-      <div className="page-header">
-        <div className="page-title">Fraud Ring Dashboard</div>
-        <div className="page-sub">Real-time graph analysis powered by TigerGraph</div>
+      <div className="page-header" style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',gap:12}}>
+        <div>
+          <div className="page-title">Fraud Ring Dashboard</div>
+          <div className="page-sub">Real-time graph analysis powered by TigerGraph</div>
+        </div>
+        <button className="btn btn-primary" onClick={onRunDemo} disabled={demoRunning}>
+          {demoRunning ? 'Running Demo Story...' : 'Play Judge Demo'}
+        </button>
       </div>
 
       <div className="stats-grid">
@@ -97,6 +102,13 @@ export default function Dashboard({ onInvestigate, onVisualize }) {
             ))
         }
       </div>
+
+      {error && (
+        <div className="card mb-4" style={{ borderColor: 'rgba(255,61,107,.4)' }}>
+          <div className="card-title">Data source error</div>
+          <div style={{ color: 'var(--text2)', fontSize: 12 }}>{error}</div>
+        </div>
+      )}
 
       <div className="grid-2" style={{alignItems:'start'}}>
 
@@ -216,6 +228,17 @@ export default function Dashboard({ onInvestigate, onVisualize }) {
             </div>
           </div>
 
+          <div className="card">
+            <div className="card-title">Judge Storyline (30 sec)</div>
+            <div style={{display:'flex',flexDirection:'column',gap:8,fontSize:12,color:'var(--text2)'}}>
+              <div><span className="tag tag-purple">1</span> Show high-risk accounts and click one suspicious node.</div>
+              <div><span className="tag tag-purple">2</span> Open <b>Investigate</b> and reveal multi-hop hidden links.</div>
+              <div><span className="tag tag-purple">3</span> Open <b>Live Graph</b> to trace real-time connected risk.</div>
+              <div><span className="tag tag-purple">4</span> Open <b>Communities</b> to show coordinated fraud rings.</div>
+              <div><span className="tag tag-purple">5</span> End on <b>Timeline</b> and quantify risk exposure volume.</div>
+            </div>
+          </div>
+
         </div>
       </div>
     </div>
@@ -223,12 +246,10 @@ export default function Dashboard({ onInvestigate, onVisualize }) {
 }
 
 const DEMO_FLAGGED = Array.from({length: 12}, (_, i) => ({
-  v_id: `ACC0${String(i).padStart(4,'0')}`,
+  v_id: `ACC0${String(i + 7).padStart(4,'0')}`,
   attributes: {
-    name: ['Alice Zhao','Bob Kiran','Carlos Mendes','Diana Osei','Ethan Park',
-           'Fatima Al-Hassan','George Liu','Hannah Patel','Ivan Sokolov','Jess Wu',
-           'Kai Tanaka','Leila Nair'][i],
-    fraud_score: [0.97,0.94,0.91,0.88,0.85,0.82,0.79,0.75,0.72,0.69,0.65,0.61][i],
+    name: `Account ${String(i + 7).padStart(3, '0')}`,
+    fraud_score: [0.96,0.94,0.93,0.92,0.91,0.89,0.88,0.86,0.84,0.82,0.8,0.78][i],
     is_flagged: true,
     country: ['US','IN','BR','GH','KR','AE','CN','IN','RU','CN','JP','IN'][i]
   }

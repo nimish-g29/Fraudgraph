@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import CytoscapeComponent from 'react-cytoscapejs'
 import axios from 'axios'
+import { demoRingDetect } from './demoData.js'
 
 const API = import.meta.env.VITE_API_URL || 'http://localhost:8000'
 
@@ -83,13 +84,16 @@ export default function Investigate({ initialAccount }) {
   const [selectedNode, setSelected] = useState(null)
   const [loading, setLoading] = useState(false)
   const [ringStats, setRingStats] = useState(null)
+  const [error, setError] = useState('')
   const cyRef = useRef(null)
+  const QUICK_TARGETS = ['ACC00007', 'ACC00009', 'ACC00012', 'ACC00016', 'ACC00031']
 
   const runDetection = useCallback(async (accountId) => {
     if (!accountId) return
 
     setLoading(true)
     setSelected(null)
+    setError('')
 
     try {
       const res = await axios.post(`${API}/ring/detect`, {
@@ -108,9 +112,14 @@ export default function Investigate({ initialAccount }) {
       })
 
     } catch {
-      const demo = makeDemoGraph(accountId)
-      setElements(demo)
-      setRingStats({ total: 7, flagged: 6, edges: 7 })
+      const demo = demoRingDetect(accountId, hops)
+      setElements([...demo.nodes, ...demo.edges])
+      setRingStats({
+        total: demo.nodes.length,
+        flagged: demo.nodes.filter(n => n.data.is_flagged).length,
+        edges: demo.edges.length
+      })
+      setError('')
     } finally {
       setLoading(false)
     }
@@ -118,6 +127,10 @@ export default function Investigate({ initialAccount }) {
 
   useEffect(() => {
     if (initialAccount) runDetection(initialAccount)
+  }, [initialAccount])
+
+  useEffect(() => {
+    if (initialAccount) setQuery(initialAccount)
   }, [initialAccount])
 
   const onNodeTap = (node) => {
@@ -176,6 +189,16 @@ export default function Investigate({ initialAccount }) {
         >
           {loading ? '...' : 'Detect'}
         </button>
+
+        <button
+          className="btn btn-ghost"
+          onClick={() => {
+            setQuery('ACC00007')
+            runDetection('ACC00007')
+          }}
+        >
+          Load Demo
+        </button>
       </div>
 
       {ringStats && (
@@ -185,11 +208,17 @@ export default function Investigate({ initialAccount }) {
           <span className="tag tag-orange">{ringStats.edges} edges</span>
         </div>
       )}
+      {error && (
+        <div className="card mb-4" style={{ borderColor: 'rgba(255,61,107,.4)' }}>
+          <div className="card-title">Query error</div>
+          <div style={{ color: 'var(--text2)', fontSize: 12 }}>{error}</div>
+        </div>
+      )}
 
       <div style={{display:'grid', gridTemplateColumns:'1fr 280px', gap:16}}>
 
         <div className="graph-container" style={{height:520}}>
-          {elements.length > 0 && (
+          {elements.length > 0 ? (
             <CytoscapeComponent
               elements={elements}
               stylesheet={CY_STYLE}
@@ -200,6 +229,10 @@ export default function Investigate({ initialAccount }) {
                 cy.on('tap', 'node', (e) => onNodeTap(e.target))
               }}
             />
+          ) : (
+            <div style={{height:'100%',display:'flex',alignItems:'center',justifyContent:'center',color:'var(--text3)',fontFamily:'var(--mono)'}}>
+              Enter an account ID and click Detect Ring
+            </div>
           )}
         </div>
 
@@ -224,21 +257,22 @@ export default function Investigate({ initialAccount }) {
               </button>
             </>
           ) : (
-            <div>Click node</div>
+            <div style={{color:'var(--text2)',fontSize:12}}>Click a node</div>
           )}
         </div>
 
       </div>
+
+      <div className="card" style={{marginTop:16}}>
+        <div className="card-title">Quick Targets</div>
+        <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
+          {QUICK_TARGETS.map((id) => (
+            <button key={id} className="btn btn-sm btn-ghost mono" onClick={() => { setQuery(id); runDetection(id) }}>
+              {id}
+            </button>
+          ))}
+        </div>
+      </div>
     </div>
   )
-}
-
-function makeDemoGraph(originId) {
-  return [
-    { data: { id:'A', label:'Alice', fraud_score:0.9, is_flagged:true, is_origin:true } },
-    { data: { id:'B', label:'Bob', fraud_score:0.6, is_flagged:true } },
-    { data: { id:'C', label:'Carol', fraud_score:0.3 } },
-    { data: { id:'e1', source:'A', target:'B' } },
-    { data: { id:'e2', source:'B', target:'C' } }
-  ]
 }

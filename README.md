@@ -72,8 +72,7 @@ npm install
 
 **Backend (Terminal 1):**
 ```bash
-python main.py
-# or: uvicorn main:app --reload --port 8000
+uvicorn main:app --reload --port 8000
 ```
 
 **Frontend (Terminal 2):**
@@ -85,12 +84,35 @@ npm run dev
 
 Visit **http://localhost:5173** in your browser.
 
-The app works with demo data by default. To connect to TigerGraph Savanna:
+The app works with a realistic fraud graph demo dataset by default.
+If TigerGraph credentials are present, the backend automatically switches to TigerGraph-backed endpoints.
+
+### TigerGraph Mode (Savanna or Community)
+
+Create `.env` from `.env.example` and set:
+
+```bash
+TG_HOST=https://your-host
+TG_GRAPH=FraudGraph
+TG_USERNAME=tigergraph
+TG_PASSWORD=your_password
+TG_SECRET=your_secret_if_used
+```
+
+Then load your schema/query/data:
 
 1. Sign up at [tgcloud.io](https://tgcloud.io)
 2. Create a free cluster
 3. Copy `.env.example` to `.env` and fill in your credentials
 4. Run the schema and data loading steps from SETUP.md
+
+### Health check
+
+```bash
+curl http://localhost:8000/health
+```
+
+If `tigergraph_connected` is `true`, you are running fully on TigerGraph.
 
 ### 6. Start frontend
 ```bash
